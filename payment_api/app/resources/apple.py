@@ -1,8 +1,16 @@
-from flask_restful import Resource
+from flask_restful import Resource, reqparse
 from flask import request
 from ..services.services import apple_subscription_service as provider_subscription_service
 from ..enums import PaymentProvider
 from ..verifiers import apple_verifier
+from ..services import payment_service
+from ..services import AppleSubscriptionData
+from ..services.payment_service import AppleData
+from typing import Dict, Any
+
+webhook_args = reqparse.RequestParser()
+webhook_args.add_argument('signedPayload', type=str, required=True, help='The signed payload from Apple')
+
 
 class AppleWebhook(Resource):
     """
@@ -13,18 +21,21 @@ class AppleWebhook(Resource):
         """
         Handles POST requests for Apple webhooks. Verifies the signature and processes the event data.
         """
-        event_data = request.json
-        if not event_data:
-            return {'status': 'error', 'message': 'No event data provided'}, 400
-        jws = event_data.get('signedPayload')
+        event_data = webhook_args.parse_args()
+
+        jws = event_data['signedPayload']
 
         if not apple_verifier.verify_signature(jws):
             return {'status': 'error', 'message': 'Invalid signature'}, 400
 
-        self.process_event(event_data)
+        is_one_time_payment = payment_service.get_items().get(PaymentProvider.APPLE.value) is not None
+
+        self.process_event(event_data, is_one_time_payment)
         return {'status': 'success'}, 200
 
-    def process_event(self, event_data: dict):
+    
+
+    def process_event(self, event_data: dict, is_one_time_payment: bool):
         """
         Processes the Apple event data and executes registered actions.
 
@@ -35,9 +46,23 @@ class AppleWebhook(Resource):
         """
         print("Received Apple event:", event_data)
         parsed_data = self.parse_event_data(event_data)
-        provider_subscription_service.execute_actions(PaymentProvider.APPLE, parsed_data)
+        if is_one_time_payment:
+            payment_service.on_apple_payment(AppleData(
+                transaction_id=parsed_data.get('transaction_id') if parsed_data.get('transaction_id') is not None else "",
+                amount=parsed_data.get('amount') if parsed_data.get('amount') is not None else 0.0,
+                currency=parsed_data.get('currency') if parsed_data.get('currency') is not None else "",
+                status=parsed_data.get('status') if parsed_data.get('status') is not None else ""
+            ))
+        else:
+            provider_subscription_service.add_subscription(
+                subscription=AppleSubscriptionData(
+                    provider=PaymentProvider.APPLE.value,
+                    user_id=parsed_data.get('user_id') if parsed_data.get('user_id') is not None else "",
+                    subscription_data=parsed_data
+                )
+            )
 
-    def parse_event_data(self, event_data: dict) -> dict:
+    def parse_event_data(self, event_data: dict) -> Dict[str, Any]:
         """
         Parses the event data to extract relevant information.
 

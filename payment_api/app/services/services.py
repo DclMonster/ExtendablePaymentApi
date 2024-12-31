@@ -1,12 +1,13 @@
 from .payment_service import PaymentService
 from .subscription.apple_subscription_service import AppleSubscriptionService
 from .subscription.google_subscription_service import GoogleSubscriptionService
-from .subscription.coinbase_subscription_service import CoinbaseSubscriptionService
-
+from .subscription.paypal_subscription_service import PaypalSubscriptionService
+from .subscription.coinsub_subscription_service import CoinsubSubscriptionService
 # Singleton instance of PaymentService
-payment_service = PaymentService()
+all_payment_service = PaymentService()
 
 # Singleton instances of SubscriptionServices
 apple_subscription_service = AppleSubscriptionService()
 google_subscription_service = GoogleSubscriptionService()
-coinbase_subscription_service = CoinbaseSubscriptionService()
+paypal_subscription_service = PaypalSubscriptionService()
+coinsub_subscription_service = CoinsubSubscriptionService()

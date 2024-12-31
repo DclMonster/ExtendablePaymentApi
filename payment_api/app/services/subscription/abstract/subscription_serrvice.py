@@ -29,13 +29,13 @@ class SubscriptionService(Generic[T], ABC):
             self.collection.update_one({'user_id': subscription['user_id'], 'provider': self.provider}, {'$set': subscription})
         else:
             self.collection.insert_one(subscription)
-        self.execute_start_actions(subscription)
+        self.__execute_start_actions(subscription)
 
     def remove_subscription(self, user_id: str) -> None:
         subscription = self.collection.find_one({'user_id': user_id, 'provider': self.provider})
         if subscription:
             self.collection.delete_one({'user_id': user_id, 'provider': self.provider})
-            self.execute_stop_actions(subscription)
+            self.__execute_stop_actions(subscription)
     
     def get_subscriptions(self, user_id: str) -> List[T]:
         return list(self.collection.find({'user_id': user_id, 'provider': self.provider}))
@@ -43,11 +43,11 @@ class SubscriptionService(Generic[T], ABC):
     def register_handler(self, handler: SubscriptionHandler[T]) -> None:
         self.__handlers.append(handler)
 
-    def execute_start_actions(self, subscription_data: T) -> None:
+    def __execute_start_actions(self, subscription_data: T) -> None:
         for handler in self.__handlers:
             handler.onSubscription(subscription_data)
 
-    def execute_stop_actions(self, subscription_data: T) -> None:
+    def __execute_stop_actions(self, subscription_data: T) -> None:
         for handler in self.__handlers:
             handler.onSubscriptionCancel(subscription_data)
 
