@@ -1,0 +1,9 @@
+Flask
+flask-restful
+pymongo
+python-dotenv
+PyJWT
+pytest 
+pre-commit
+cryptography
+requests

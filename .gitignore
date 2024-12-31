@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+.build/
+*.egg-info/
+
+# PyInstaller
+dist/
+build/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+*.cover
+*.py,cover
+.hypothesis/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+
+# Environments
+.env
+.venv
+
+# VS Code
+.vscode/
+
+# Pre-commit
+.pre-commit-config.yaml
+
+# Other
+*.log
+*.pot
+*.mo
+*.swp
+*.swo
+*.swn 
