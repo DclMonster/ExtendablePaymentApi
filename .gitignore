@@ -53,3 +53,5 @@ htmlcov/
 *.swp
 *.swo
 *.swn 
+/node_modules/
+node_modules/
