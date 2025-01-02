@@ -2,11 +2,13 @@ from abc import ABC, abstractmethod
 from typing import TypeVar, Generic, Dict, List
 from .available_item import AvailableItem
 from .base_payment_data import BasePaymentData
+
 T = TypeVar('T', bound=BasePaymentData)
 
 class PaymentHandler(Generic[T], ABC):
+
     @abstractmethod
-    def onPayment(self, payment: T):
+    def onPayment(self, payment: T) -> None:
         pass
 
     @abstractmethod

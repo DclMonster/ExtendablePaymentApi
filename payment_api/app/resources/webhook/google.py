@@ -1,9 +1,9 @@
 from flask_restful import Resource
 from flask import request
-from ..services.services import google_subscription_service as provider_subscription_service
-from ..enums import PaymentProvider
-from ..verifiers import google_verifier
-from ..services.subscription.google_subscription_service import GoogleSubscriptionData
+from payment_api.app.services.google_subscription_service import google_subscription_service as provider_subscription_service
+from payment_api.app.enums import PaymentProvider
+from payment_api.app.verifiers import google_verifier
+from payment_api.app.services.subscription.google_subscription_service import GoogleSubscriptionData
 
 class GoogleWebhook(Resource):
     """

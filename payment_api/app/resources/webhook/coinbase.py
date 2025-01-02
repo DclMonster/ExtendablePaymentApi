@@ -1,8 +1,8 @@
 from flask_restful import Resource
 from flask import request, jsonify
-from ..services import payment_service, coinbase_subscription_service
-from ..enums import PaymentProvider
-from ..verifiers import coinbase_verifier
+from payment_api.app.services import payment_service, coinbase_subscription_service
+from payment_api.app.enums import PaymentProvider
+from payment_api.app.verifiers import coinbase_verifier
 import requests
 
 class CoinbaseWebhook(Resource):

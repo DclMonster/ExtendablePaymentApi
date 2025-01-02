@@ -1,11 +1,11 @@
 from flask_restful import Resource, reqparse
 from flask import request
-from ..services.services import apple_subscription_service as provider_subscription_service
-from ..enums import PaymentProvider
-from ..verifiers import apple_verifier
-from ..services import payment_service
-from ..services import AppleSubscriptionData
-from ..services.payment_service import AppleData
+from payment_api.app.services.apple_subscription_service import apple_subscription_service as provider_subscription_service
+from payment_api.app.enums import PaymentProvider
+from payment_api.app.verifiers import apple_verifier
+from payment_api.app.services import payment_service
+from payment_api.app.services.apple_subscription_service import AppleSubscriptionData
+from payment_api.app.services.payment_service import AppleData
 from typing import Dict, Any
 
 webhook_args = reqparse.RequestParser()

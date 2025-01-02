@@ -1,7 +1,7 @@
 from flask_restful import Resource
 from flask import request
 import requests
-from app.verifiers.verifiers import coinsub_verifier
+from payment_api.app.verifiers.coinsub_verifier import coinsub_verifier
 class CoinSubWebhook(Resource):
     """
     Resource class to handle CoinSub webhook events.

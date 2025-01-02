@@ -3,7 +3,7 @@ from flask import request
 from flask_restful import Resource
 from app.verifiers.verifiers import paypal_verifier
 
-class PayPalWebhook(Resource):
+class PaypalWebhook(Resource):
     """
     Resource class to handle PayPal webhook events.
     """
