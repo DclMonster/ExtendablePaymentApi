@@ -1,13 +1,10 @@
-from flask_restful import Resource, reqparse
+from flask_restful import Resource, reqparse # type: ignore
 from flask import request
-from payment_api.app.services.apple_subscription_service import apple_subscription_service as provider_subscription_service
-from payment_api.app.enums import PaymentProvider
-from payment_api.app.verifiers import apple_verifier
-from payment_api.app.services import payment_service
-from payment_api.app.services.apple_subscription_service import AppleSubscriptionData
-from payment_api.app.services.payment_service import AppleData
-from typing import Dict, Any
-from payment_api.app.resources.webhook.abstract.abstract_webhook import AbstractWebhook
+from ...services.store.payment.subscription_collection_service import SubscriptionCollectionService
+from ...enums import PaymentProvider
+from ...verifiers import apple_verifier
+from typing import Dict, Any, Tuple
+from ...resources.webhook.abstract.abstract_webhook import AbstractWebhook
 
 webhook_args = reqparse.RequestParser()
 webhook_args.add_argument('signedPayload', type=str, required=True, help='The signed payload from Apple')
@@ -87,32 +84,5 @@ class AppleWebhook(AbstractWebhook, Resource):
     Resource class to handle Apple webhook events.
     """
 
-    def __init__(self):
+    def __init__(self, item_collection_service: ItemCollectionService):
         super().__init__(apple_verifier.verify_signature)
-
-    def is_one_time_payment(self) -> bool:
-        """
-        Determine if the Apple event is a one-time payment.
-
-        Returns
-        -------
-        bool
-            True if it is a one-time payment, False otherwise.
-        """
-        return payment_service.get_items().get(PaymentProvider.APPLE.value) is not None
-
-    def post(self):
-        """
-        Handles POST requests for Apple webhooks. Verifies the signature and processes the event data.
-        """
-        event_data = webhook_args.parse_args()
-
-        jws = event_data['signedPayload']
-
-        if not verify_apple_signature(jws):
-            return {'status': 'error', 'message': 'Invalid signature'}, 400
-
-        is_one_time_payment = self.is_one_time_payment()
-
-        process_apple_event(event_data, is_one_time_payment)
-        return {'status': 'success'}, 200 

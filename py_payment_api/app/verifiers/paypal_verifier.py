@@ -7,41 +7,18 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
-class PayPalVerifier:
+from .abstract.signature_verifier import SignatureVerifier
+
+class PayPalVerifier(SignatureVerifier):
     def __init__(self):
-        secret = os.getenv('PAYPAL_SECRET')
-        if secret is None:
-            raise ValueError("PAYPAL_SECRET environment variable must be set")
-        self.__secret = secret
+        super('PAYPAL_SECRET')
         self.__webhook_id = os.getenv('PAYPAL_WEBHOOK_ID')  # Ensure you set this environment variable
 
-    def verify_signature(self, transmission_id: str, timestamp: str, webhook_id: str, event_body: str, cert_url: str, actual_signature: str, auth_algo: str) -> bool:
-        """
-        Verifies the PayPal webhook signature.
-
-        Parameters
-        ----------
-        transmission_id : str
-            The PayPal transmission ID.
-        timestamp : str
-            The timestamp of the transmission.
-        webhook_id : str
-            The ID of the webhook.
-        event_body : str
-            The body of the webhook event.
-        cert_url : str
-            The certificate URL.
-        actual_signature : str
-            The actual signature to verify.
-        auth_algo : str
-            The algorithm used for the signature.
-
-        Returns
-        -------
-        bool
-            True if the signature is valid, False otherwise.
-        """
+    def verify_signature(self, data: str, signature: str) -> bool:
         try:
+            # Extract necessary components from data
+            transmission_id, timestamp, webhook_id, event_body, cert_url, auth_algo = data.split('|')
+
             # Ensure the webhook_id matches the expected one
             if webhook_id != self.__webhook_id:
                 raise ValueError("Webhook ID does not match the expected value.")
@@ -56,7 +33,7 @@ class PayPalVerifier:
             expected_message = f"{transmission_id}|{timestamp}|{webhook_id}|{event_body}"
 
             # Step 3: Decode the actual signature from base64
-            decoded_signature = base64.b64decode(actual_signature)
+            decoded_signature = base64.b64decode(signature)
 
             # Step 4: Determine the hash algorithm
             if auth_algo == "SHA256withRSA":
@@ -83,5 +60,8 @@ class PayPalVerifier:
             # Log the exception details for debugging
             print(f"Signature verification failed: {str(e)}")
             return False
+
+    def get_signature_from_header(self, header) -> str:
+        return header.get('PAYPAL-AUTH-ALGO', '')
 
         

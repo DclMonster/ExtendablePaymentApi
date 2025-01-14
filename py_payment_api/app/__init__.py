@@ -21,36 +21,82 @@ from .services import (
     coinsub_subscription_service,
     all_payment_service,
 )
+from .enums import PaymentProvider
+
 def creditor_configure(
     app: Flask,
-    apple_sub_handlers: List[SubscriptionHandler[AppleSubscriptionData]],
-    google_sub_handlers: List[SubscriptionHandler[GoogleSubscriptionData]],
-    paypal_sub_handlers: List[SubscriptionHandler[PaypalSubscriptionData]],
-    coinsub_sub_handlers: List[SubscriptionHandler[CoinSubScriptionData]],
-    apple_payment_handlers: List[PaymentHandler[AppleData]],
-    google_payment_handlers: List[PaymentHandler[GoogleData]],
-    paypal_payment_handlers: List[PaymentHandler[PaypalData]],
-    coinsub_payment_handlers: List[PaymentHandler[CoinSubData]],
-    coinbase_payment_handlers: List[PaymentHandler[CoinbaseData]],
+    handlers: dict[PaymentProvider, List[SubscriptionHandler | PaymentHandler]]
 ) -> None:
     configure_creditor(app)
-    __configure_payment_api(
-        app,
-        apple_sub_handlers,
-        google_sub_handlers,
-        paypal_sub_handlers,
-        coinsub_sub_handlers,
-        apple_payment_handlers,
-        google_payment_handlers,
-        paypal_payment_handlers,
-        coinsub_payment_handlers,
-        coinbase_payment_handlers,
-    )
+    for provider, handler_list in handlers.items():
+        if provider == PaymentProvider.APPLE:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    apple_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_apple_payment_handler(handler)
+        elif provider == PaymentProvider.GOOGLE:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    google_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_google_payment_handler(handler)
+        elif provider == PaymentProvider.PAYPAL:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    paypal_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_paypal_payment_handler(handler)
+        elif provider == PaymentProvider.COINSUB:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    coinsub_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_coinsub_payment_handler(handler)
+        elif provider == PaymentProvider.COINBASE:
+            for handler in handler_list:
+                if isinstance(handler, PaymentHandler):
+                    all_payment_service.register_coinbase_payment_handler(handler)
 
 
-def webhook_configure(app: Flask) -> None:
-    configure_webhook(app)
+def webhook_configure(app: Flask, enabled_providers: list[PaymentProvider]) -> None:
+    configure_webhook(app, enabled_providers)
 
+def configure_webhook_and_handler(
+    app: Flask,
+    handlers: dict[PaymentProvider, List[SubscriptionHandler | PaymentHandler]],
+    enabled_providers: list[PaymentProvider]
+) -> None:
+    webhook_configure(app, enabled_providers)
+    for provider, handler_list in handlers.items():
+        if provider == PaymentProvider.APPLE:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    apple_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_apple_payment_handler(handler)
+        elif provider == PaymentProvider.GOOGLE:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    google_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_google_payment_handler(handler)
+        elif provider == PaymentProvider.PAYPAL:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    paypal_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_paypal_payment_handler(handler)
+        elif provider == PaymentProvider.COINSUB:
+            for handler in handler_list:
+                if isinstance(handler, SubscriptionHandler):
+                    coinsub_subscription_service.register_handler(handler)
+                elif isinstance(handler, PaymentHandler):
+                    all_payment_service.register_coinsub_payment_handler(handler)
+        elif provider == PaymentProvider.COINBASE:
+            for handler in handler_list:
+                if isinstance(handler, PaymentHandler):
+                    all_payment_service.register_coinbase_payment_handler(handler)
 
 def __configure_payment_api(
     app: Flask,

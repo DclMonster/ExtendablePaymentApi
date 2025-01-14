@@ -1,13 +1,11 @@
 import hmac
 import hashlib
 import os
+from .abstract.signature_verifier import SignatureVerifier
 
-class CoinsubVerifier:
+class CoinsubVerifier(SignatureVerifier):
     def __init__(self):
-        secret : str | None = os.getenv('COINSUB_SECRET')
-        if not secret:
-            raise ValueError("COINSUB_SECRET environment variable must be set")
-        self.__secret = secret
+        super('COINSUB_SECRET')
 
     def verify_signature(self, payload: str, actual_signature: str | None) -> bool:
         """
@@ -27,5 +25,8 @@ class CoinsubVerifier:
         """
         if not actual_signature:
             raise ValueError("Signature not provided")
-        computed_signature = hmac.new(self.__secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        computed_signature = hmac.new(self._secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
         return hmac.compare_digest(computed_signature, actual_signature) 
+
+    def get_signature_from_header(self, header) -> str:
+        return header.get('COINSUB-SIGNATURE', '') 

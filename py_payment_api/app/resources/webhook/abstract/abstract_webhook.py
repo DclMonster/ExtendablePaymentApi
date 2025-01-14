@@ -1,16 +1,24 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, final
 from flask import request
+from ....verifiers import SignatureVerifier
+from ....services.forwarder.abstract.forwarder import Forwarder
+from ....services.store.payment.abstract.item_collection_service import ItemCollectionService
+from ....services.store.payment.abstract.payment_handler import PaymentHandler
+from ....services.store.payment.abstract.item_collection_service import ItemCollectionService
+from ....enums import PaymentProvider
+
 class AbstractWebhook(ABC):
     """
     Abstract class for webhook handling.
     """
-    __verify_function: Callable[[str], bool]
+    __verifier: SignatureVerifier
+    __provider_type : PaymentProvider
     __get_signature_function: Callable[[], str]
-    def __init__(self, get_signature_function: Callable[[], str],
-                  verify_function: Callable[[str], bool],
-                  parse_event_data_function: Callable[[str], Dict[str, Any]],
-                  is_one_time_payment_function: Callable[[], bool]):
+    def __init__(self, 
+                verifier : SignatureVerifier,
+                forwarder: Forwarder,
+            ) -> None:
         """
         Initialize the webhook with a verification function.
 
@@ -19,20 +27,16 @@ class AbstractWebhook(ABC):
         verify_function : callable
             A function to verify the signature of the webhook event.
         """
-        self.__verify_function = verify_function
-        self.__get_signature_function = get_signature_function
-
+        self.__verifier = verifier
+        self.__forwarder = forwarder
     @final
     def post(self):
         """
         Handle the POST request for the webhook.
         """
         data = request.get_data(as_text=True)
-        signature = self.__get_signature_function(data)
-
-        if not self.__verify_function(data, signature):
-            return {'status': 'error', 'message': 'Invalid signature'}, 400
-        
+        self.__verifier.verify_header_signature(data, data.header)
+   
         event_data = self.parse_event_data(data)
 
     @abstractmethod

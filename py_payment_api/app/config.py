@@ -2,8 +2,9 @@ from flask import Flask
 from flask_restful import Api
 import resources
 from dotenv import load_dotenv
+from .enums import PaymentProvider
 
-def configure_webhook(app: Flask) -> None:
+def configure_webhook(app: Flask, enabled_providers: list[PaymentProvider]) -> None:
     """
     Configure the given Flask application.
 
@@ -11,6 +12,8 @@ def configure_webhook(app: Flask) -> None:
     ----------
     app : Flask
         The Flask application to configure.
+    enabled_providers : list[PaymentProvider]
+        List of enabled payment providers.
     """
     # Load environment variables
     load_dotenv()
@@ -18,12 +21,17 @@ def configure_webhook(app: Flask) -> None:
     # Initialize the API
     api = Api(app)
 
-    # Register the webhook resources
-    api.add_resource(resources.CoinbaseWebhook, '/webhook/coinbase')
-    api.add_resource(resources.AppleWebhook, '/webhook/apple')
-    api.add_resource(resources.GoogleWebhook, '/webhook/google')
-    api.add_resource(resources.PaypalWebhook, '/webhook/paypal')
-    api.add_resource(resources.CoinSubWebhook, '/webhook/coinsub')
+    # Conditionally register the webhook resources
+    if PaymentProvider.COINBASE in enabled_providers:
+        api.add_resource(resources.CoinbaseWebhook, '/webhook/coinbase')
+    if PaymentProvider.APPLE in enabled_providers:
+        api.add_resource(resources.AppleWebhook, '/webhook/apple')
+    if PaymentProvider.GOOGLE in enabled_providers:
+        api.add_resource(resources.GoogleWebhook, '/webhook/google')
+    if PaymentProvider.PAYPAL in enabled_providers:
+        api.add_resource(resources.PaypalWebhook, '/webhook/paypal')
+    if PaymentProvider.COINSUB in enabled_providers:
+        api.add_resource(resources.CoinSubWebhook, '/webhook/coinsub')
     
 
 

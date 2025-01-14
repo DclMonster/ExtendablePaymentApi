@@ -1,8 +1,9 @@
 import hmac
 import hashlib
 import os
+from .abstract.signature_verifier import SignatureVerifier
 
-class CoinbaseVerifier:
+class CoinbaseVerifier(SignatureVerifier):
     """
     Verifier class for Coinbase webhook signatures.
     """
@@ -11,9 +12,7 @@ class CoinbaseVerifier:
         """
         Initializes the verifier with the secret from environment variables.
         """
-        self.secret = os.getenv('COINBASE_WEBHOOK_SECRET')
-        if not self.secret:
-            raise ValueError("Coinbase webhook secret not set in environment variables.")
+        super('COINBASE_WEBHOOK_SECRET')
 
     def verify_signature(self, data: str, signature: str) -> bool:
         """
@@ -32,8 +31,11 @@ class CoinbaseVerifier:
             True if the signature is valid, False otherwise.
         """
         computed_signature = hmac.new(
-            key=self.secret.encode(),
+            key=self._secret.encode(),
             msg=data.encode(),
             digestmod=hashlib.sha256
         ).hexdigest()
         return hmac.compare_digest(computed_signature, signature) 
+
+    def get_signature_from_header(self, header) -> str:
+        return header.get('CB-SIGNATURE', '') 

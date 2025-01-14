@@ -1,7 +1,8 @@
 import jwt
 import os
+from .abstract.signature_verifier import SignatureVerifier
 
-class GoogleVerifier:
+class GoogleVerifier(SignatureVerifier):
     """
     Verifier class for Google webhook signatures.
     """
@@ -10,18 +11,18 @@ class GoogleVerifier:
         """
         Initializes the verifier with the public key from environment variables.
         """
-        self.public_key = os.getenv('GOOGLE_PUBLIC_KEY')
-        if not self.public_key:
-            raise ValueError("Google public key not set in environment variables.")
+        super('GOOGLE_PUBLIC_KEY')
 
-    def verify_signature(self, jwt_token: str) -> bool:
+    def verify_signature(self, data: str, signature: str) -> bool:
         """
         Verifies the signature of the webhook request.
 
         Parameters
         ----------
-        jwt_token : str
-            The JWT token from the event data.
+        data : str
+            The signed payload from the event data.
+        signature : str
+            The signature to verify.
 
         Returns
         -------
@@ -29,9 +30,25 @@ class GoogleVerifier:
             True if the signature is valid, False otherwise.
         """
         try:
-            decoded = jwt.decode(jwt_token, self.public_key, algorithms=['RS256'])
+            decoded = jwt.decode(signature, self._secret, algorithms=['RS256'])
             return True
         except jwt.exceptions.InvalidSignatureError:
             return False
         except jwt.exceptions.DecodeError:
-            return False 
+            return False
+
+    def get_signature_from_header(self, header) -> str:
+        """
+        Extracts the signature from the header.
+
+        Parameters
+        ----------
+        header : Any
+            The header containing the signature.
+
+        Returns
+        -------
+        str
+            The extracted signature.
+        """
+        return header.get('Signature', '') 
