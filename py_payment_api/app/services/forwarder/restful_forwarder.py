@@ -1,33 +1,27 @@
-from ExtendablePaymentApi.py_payment_api.app.services.forwarder.abstract.forwarder import Forwarder
+from .abstract.single_forwarder import SingleForwarder
 import os
 import requests
-from typing import Optional, List
-from ..store.payment.abstract.item_collection_service import ItemCollectionService
+from typing import Optional, List, Generic, TypeVar, Dict, Any, final
+from ..store.payment.abstract.item_collection_service import ItemCollectionService, PurchaseStatus
+from enum import StrEnum
+SUBSCRIPTION_ITEM_CATEGORY = TypeVar('SUBSCRIPTION_ITEM_CATEGORY', bound=StrEnum)
+ONE_TIME_ITEM_CATEGORY = TypeVar('ONE_TIME_ITEM_CATEGORY', bound=StrEnum)
+class ForwarderError(Exception):
+    pass
 
-class RestfulForwarder(Forwarder):
+@final
+class RestfulForwarder(SingleForwarder):
 
-    def __init__(self, url: str, logger: Optional[List[ItemCollectionService]] = None) -> None:
-        super().__init__()
+    def __init__(self, url: str) -> None:
+        super().__init__(PurchaseStatus.SENT_TO_PROCESSOR)
         self.url = url
         self.route = os.getenv('ROUTE', "/creditor_api")
-        self.logger = logger
-        if self.logger:
-            for log_service in self.logger:
-                log_service.log(f"Initializing RestfulForwarder with URL: {self.url} and route: {self.route}")
 
-    def forward_event(self, event_data: dict) -> None:
+    @final
+    def _on_forward_event(self, event_data: Dict[str, Any]) -> None:
         full_url = f"{self.url}{self.route}"
-        if self.logger:
-            for log_service in self.logger:
-                log_service.log(f"Forwarding event to URL: {full_url} with data: {event_data}")
         try:
-            response = requests.post(full_url, json=event_data)
+            response = requests.post(full_url, json=event_data, headers={"Content-Type": "application/json"})
             response.raise_for_status()
-            if self.logger:
-                for log_service in self.logger:
-                    log_service.log(f"Successfully forwarded event to {full_url}")
         except requests.exceptions.RequestException as e:
-            if self.logger:
-                for log_service in self.logger:
-                    log_service.log(f"Failed to forward event to {full_url}: {e}")
-            raise
+            raise ForwarderError(f"Failed to forward event to {full_url}: {e}") from e

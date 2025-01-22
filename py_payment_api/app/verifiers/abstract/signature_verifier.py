@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import final
+from typing import Any, Dict, final
 import os
 
 class SignatureVerifier(ABC):
@@ -9,21 +9,23 @@ class SignatureVerifier(ABC):
         self.__get_secret_from_env(secret_key)
 
     @final
-    def verify_header_signature(self, data: str, header) -> None:
+    def verify_header_signature(self, data: Dict[str, Any], header : Dict[str, Any]) -> bool:
         if not self.verify_signature(data,self.get_signature_from_header(header)):
             raise ValueError('Bad signature')
+        return True
 
     @abstractmethod
-    def verify_signature(self, data: str, signature: str) -> bool:
+    def verify_signature(self, data: Dict[str, Any], signature: str) -> bool:
         pass
 
     @abstractmethod
-    def get_signature_from_header(self,header):
+    def get_signature_from_header(self,header : Dict[str, Any]) -> str:
         pass
 
-    def __get_secret_from_env(self,key : str):
-        secret : str | None = os.getenv('GOOGLE_PUBLIC_KEY')
+    def __get_secret_from_env(self,key : str) -> str:
+        secret : str | None = os.getenv(key)
         if not secret:
-            raise ValueError("Google public key not set in environment variables.")
+            raise ValueError(f"{key} not set in environment variables.")
         else:
             self._secret = secret
+            return self._secret

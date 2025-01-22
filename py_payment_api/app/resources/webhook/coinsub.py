@@ -1,92 +1,184 @@
-from flask_restful import Resource
+from flask_restful import Resource # type: ignore
 from flask import request
-import requests
-from payment_api.app.verifiers.coinsub_verifier import coinsub_verifier
-class CoinSubWebhook(Resource):
-    """
-    Resource class to handle CoinSub webhook events.
-    """
+from ...services import PaymentProvider
+from ...verifiers import coinsub_verifier
+from ...services.forwarder.abstract.forwarder import Forwarder, ForwarderType
+from typing import Dict, Any, Optional, NotRequired, cast, Literal, TypeVar, Generic
+from typing import TypedDict
+from enum import StrEnum
+from ...resources.webhook.abstract.abstract_webhook import AbstractWebhook
+from ...services.store.enum.item_type import ItemType
+from ...services.store.payment.one_time.one_time_payment_data import OneTimePaymentData
+from ...services.store.payment.subscription.subscription_payment_data import SubscriptionPaymentData
+from datetime import datetime
+import json
 
-    def post(self):
-        """
-        Handles POST requests for CoinSub webhooks.
-        """
-        data = request.get_json()
-        if not data:
-            return {'status': 'error', 'message': 'No event data provided'}, 400
-        self.process_event(data)
-        return {'status': 'success'}, 200
+ITEM_CATEGORY = TypeVar('ITEM_CATEGORY', bound=StrEnum)
 
-    def process_event(self, event_data: dict):
-        """
-        Processes the CoinSub event data and executes registered actions.
+class CoinSubWebhookError(Exception):
+    """Base exception for CoinSub webhook errors."""
+    pass
 
+class CoinSubWebhookData(TypedDict):
+    transaction_id: str
+    amount: float
+    currency: str
+    status: Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid']
+    user_id: NotRequired[str]
+    subscription_id: NotRequired[str]
+
+class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData, ITEM_CATEGORY]):
+    """Resource class to handle CoinSub webhook events."""
+    
+    def __init__(self, forwarder: Forwarder) -> None:
+        """Initialize the webhook handler.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data received from CoinSub.
+        forwarder : Forwarder
+            The forwarder for webhook events
         """
-        signature = request.headers.get('X-Coinsub-Signature')
-        print("Received CoinSub event:", event_data)
-        event_type = event_data.get('event_type')
-        if not coinsub_verifier.verify_signature(event_data, signature):
-            return {'status': 'error', 'message': 'Signature verification failed'}, 400
+        super().__init__(
+            provider_type=PaymentProvider.COINSUB,
+            verifier=coinsub_verifier,
+            forwarder=forwarder
+        )
+
+    def parse_event_data(self, event_data: str) -> CoinSubWebhookData:
+        """Parse the CoinSub API event data.
+        
+        Parameters
+        ----------
+        event_data : str
+            Raw event data from CoinSub API
+            
+        Returns
+        -------
+        CoinSubWebhookData
+            Parsed event data
+            
+        Raises
+        ------
+        CoinSubWebhookError
+            If required fields are missing
+        """
+        try:
+            data = json.loads(event_data)
+            if not data:
+                raise CoinSubWebhookError("No JSON data in request")
+                
+            # CoinSub API specific field mapping
+            event_type = data.get('event_type')
+            subscription = data.get('subscription', {})
+            
+            # Required fields check
+            required_fields = ['transaction_id', 'amount', 'currency', 'status']
+            missing_fields = [field for field in required_fields if field not in subscription]
+            if missing_fields:
+                raise CoinSubWebhookError(f"Missing required fields: {', '.join(missing_fields)}")
+                
+            # Map CoinSub API fields to our webhook data format
+            status = self._map_status(event_type, subscription.get('status'))
+            if status not in ('webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'):
+                status = 'webhook_recieved'
+                
+            return {
+                'transaction_id': subscription['transaction_id'],
+                'amount': float(subscription.get('amount', 0.0)),
+                'currency': subscription.get('currency', 'USD'),
+                'status': cast(Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'], status),
+                'user_id': subscription.get('user_id', ''),
+                'subscription_id': subscription.get('subscription_id', '')
+            }
+        except (ValueError, KeyError) as e:
+            raise CoinSubWebhookError(f"Error parsing event data: {str(e)}")
+
+    def _map_status(self, event_type: str, status: str) -> str:
+        """Map CoinSub API status to our internal status.
+        
+        Parameters
+        ----------
+        event_type : str
+            The event type from CoinSub API
+        status : str
+            The status from CoinSub API
+            
+        Returns
+        -------
+        str
+            Our internal status representation
+        """
         if event_type == 'subscription_created':
-            self.handle_subscription_created(event_data)
+            return 'webhook_recieved'
+        elif event_type == 'subscription_activated':
+            return 'paid'
         elif event_type == 'subscription_canceled':
-            self.handle_subscription_canceled(event_data)
-        # Add more event types as needed
+            return 'sent_to_processor'
+        elif event_type == 'subscription_renewed':
+            return 'paid'
+        elif event_type == 'subscription_failed':
+            return 'webhook_recieved'
+        elif event_type == 'subscription_expired':
+            return 'sent_to_processor'
+        else:
+            return 'webhook_recieved'
 
-    def handle_subscription_created(self, event_data: dict):
-        """
-        Handles subscription creation events.
-
+    def _item_name_provider(self, event_data: CoinSubWebhookData) -> str:
+        """Get the item name from the provider.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data for the subscription creation.
+        event_data : CoinSubWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        str
+            The item name
         """
-        print("Subscription created:", event_data)
-        # Implement logic to handle subscription creation
+        return event_data.get('subscription_id', '')
 
-    def handle_subscription_canceled(self, event_data: dict):
-        """
-        Handles subscription cancellation events.
-
+    def _get_one_time_payment_data(self, event_data: CoinSubWebhookData) -> OneTimePaymentData[ITEM_CATEGORY]:
+        """Get one-time payment data from the event data.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data for the subscription cancellation.
+        event_data : CoinSubWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        OneTimePaymentData
+            The one-time payment data
         """
-        print("Subscription canceled:", event_data)
-        # Implement logic to handle subscription cancellation
+        return OneTimePaymentData(
+            user_id=event_data['user_id'],
+            item_category=cast(ITEM_CATEGORY, ItemType.ONE_TIME_PAYMENT),
+            purchase_id=event_data['transaction_id'],
+            item_name=self._item_name_provider(event_data),
+            time_bought=datetime.now().isoformat(),
+            status=event_data['status'],
+            quantity=1
+        )
 
-# Function to create a CoinSub subscription
-
-def create_coinsub_subscription(user_id: str, plan_id: str):
-    """
-    Creates a subscription using the CoinSub API.
-
-    Parameters
-    ----------
-    user_id : str
-        The ID of the user.
-    plan_id : str
-        The ID of the subscription plan.
-
-    Returns
-    -------
-    dict
-        The response from the CoinSub API.
-    """
-    url = "https://api.coinsub.com/v1/subscriptions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer YOUR_ACCESS_TOKEN"
-    }
-    data = {
-        "user_id": user_id,
-        "plan_id": plan_id
-    }
-    response = requests.post(url, json=data, headers=headers)
-    return response.json() 
+    def _get_subscription_payment_data(self, event_data: CoinSubWebhookData) -> SubscriptionPaymentData[ITEM_CATEGORY]:
+        """Get subscription payment data from the event data.
+        
+        Parameters
+        ----------
+        event_data : CoinSubWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        SubscriptionPaymentData
+            The subscription payment data
+        """
+        return SubscriptionPaymentData(
+            user_id=event_data['user_id'],
+            item_category=cast(ITEM_CATEGORY, ItemType.SUBSCRIPTION),
+            purchase_id=event_data['transaction_id'],
+            item_name=self._item_name_provider(event_data),
+            time_bought=datetime.now().isoformat(),
+            status=event_data['status']
+        ) 

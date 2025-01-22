@@ -2,13 +2,14 @@ from pymongo import MongoClient
 import os
 from abc import ABC, abstractmethod
 from pymongo.database import Database
+from typing import Any
 class MongoDBService(ABC):
     """
     Service class for interacting with MongoDB to retrieve store items.
     """
 
-    __client: MongoClient
-    _db: Database
+    __client: MongoClient[Any]
+    _db: Database[Any]
 
     def __init__(self, database_name: str = 'Store'):
         """

@@ -1,17 +1,29 @@
-import crypto from 'crypto';
+import { IncomingHttpHeaders } from 'http';
+import { SignatureVerifier } from './abstract/SignatureVerifier';
+import jwt from 'jsonwebtoken';
 
-export class GoogleVerifier {
-    private publicKey: string;
-
-    constructor(publicKey: string) {
-        this.publicKey = publicKey;
+export class GoogleVerifier extends SignatureVerifier {
+    constructor() {
+        super('GOOGLE_PUBLIC_KEY');
     }
 
-    verifySignature(jws: string): boolean {
-        // Implement the logic to verify the JWS signature using the public key
-        // This is a placeholder implementation
-        const verifier = crypto.createVerify('SHA256');
-        verifier.update(jws);
-        return verifier.verify(this.publicKey, jws, 'base64');
+    protected async verifySignature(data: Record<string, any>, signature: string): Promise<boolean> {
+        try {
+            jwt.verify(signature, this.secret, { algorithms: ['RS256'] });
+            return true;
+        } catch (error) {
+            if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
+                return false;
+            }
+            throw error;
+        }
+    }
+
+    protected getSignatureFromHeader(headers: IncomingHttpHeaders): string {
+        const signature = headers['signature'];
+        if (!signature || Array.isArray(signature)) {
+            throw new Error('Invalid or missing Google signature in headers');
+        }
+        return signature;
     }
 } 

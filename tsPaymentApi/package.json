@@ -1,33 +1,39 @@
 {
-  "name": "tspaymentapi",
+  "name": "ts-payment-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "TypeScript Payment API",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
-    "start": "node dist/app.js",
-    "dev": "nodemon --exec ts-node src/app.ts"
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "test": "jest"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@types/mongodb": "^4.0.7",
+    "axios": "^1.6.5",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-restful": "^1.0.0",
     "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.12.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.14",
+    "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.10.6",
+    "jest": "^29.7.0",
     "nodemon": "^3.1.9",
-    "ts-node": "^10.9.2",
+    "ts-jest": "^29.2.5",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5.3.3"
   }
 }

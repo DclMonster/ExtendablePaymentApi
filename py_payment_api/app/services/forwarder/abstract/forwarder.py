@@ -1,20 +1,15 @@
 from abc import ABC, abstractmethod
-from typing import Callable
-from ExtendablePaymentApi.py_payment_api.app.services.store.payment.abstract.item_collection_service import ItemCollectionService
-class Forwarder(ABC):
+from typing import Dict, Any, final, TypeVar, Generic, Protocol
+from ExtendablePaymentApi.py_payment_api.app.services.store.payment.abstract.item_collection_service import ItemCollectionService, PurchaseStatus
+from enum import StrEnum
+from ....services import get_services, Services
 
-    __logging_function : Callable[[Logger], None]
-    def __init__(self, logging_function : Callable[[Logger], None]) -> None:
-        self.__logging_function = logging_function
+class ForwarderType(StrEnum):
+    WEBSOCKET = "websocket"
+    REST = "rest"
 
-    @final
-    def forward_event(self, event_data: dict) -> None:
-        """
-        Forward the event data.
-        """
-        self.__logging_function(logger)
-        self._on_forward_event(event_data)
+class Forwarder(Protocol):
 
     @abstractmethod
-    def _on_forward_event(self, event_data: dict) -> None:
+    def forward_event(self, event_data: Dict[str, Any]) -> None:
         pass

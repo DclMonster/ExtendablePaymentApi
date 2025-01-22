@@ -8,16 +8,27 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from .abstract.signature_verifier import SignatureVerifier
+from typing import Dict, Any, Optional, cast
+
 
 class PayPalVerifier(SignatureVerifier):
-    def __init__(self):
-        super('PAYPAL_SECRET')
-        self.__webhook_id = os.getenv('PAYPAL_WEBHOOK_ID')  # Ensure you set this environment variable
+    def __init__(self) -> None:
+        super().__init__("PAYPAL_SECRET")
+        self.__webhook_id = os.getenv(
+            "PAYPAL_WEBHOOK_ID"
+        )  # Ensure you set this environment variable
 
-    def verify_signature(self, data: str, signature: str) -> bool:
+    def verify_signature(self, data: Dict[str, Any], signature: str) -> bool:
         try:
             # Extract necessary components from data
-            transmission_id, timestamp, webhook_id, event_body, cert_url, auth_algo = data.split('|')
+            transmission_id, timestamp, webhook_id, event_body, cert_url, auth_algo = (
+                data["transmissionId"],
+                data["timestamp"],
+                data["webhookId"],
+                data["eventBody"],
+                data["certUrl"],
+                data["authAlgo"],
+            )
 
             # Ensure the webhook_id matches the expected one
             if webhook_id != self.__webhook_id:
@@ -30,7 +41,9 @@ class PayPalVerifier(SignatureVerifier):
             cert = x509.load_pem_x509_certificate(cert_data, default_backend())
 
             # Step 2: Construct the expected message
-            expected_message = f"{transmission_id}|{timestamp}|{webhook_id}|{event_body}"
+            expected_message = (
+                f"{transmission_id}|{timestamp}|{webhook_id}|{event_body}"
+            )
 
             # Step 3: Decode the actual signature from base64
             decoded_signature = base64.b64decode(signature)
@@ -46,12 +59,14 @@ class PayPalVerifier(SignatureVerifier):
             if isinstance(public_key, rsa.RSAPublicKey):
                 public_key.verify(
                     decoded_signature,
-                    expected_message.encode('utf-8'),
+                    expected_message.encode("utf-8"),
                     padding.PKCS1v15(),
                     hash_alg,
                 )
             else:
-                raise TypeError("Unsupported public key type for signature verification.")
+                raise TypeError(
+                    "Unsupported public key type for signature verification."
+                )
 
             # If no exception was raised, the signature is valid
             return True
@@ -61,7 +76,5 @@ class PayPalVerifier(SignatureVerifier):
             print(f"Signature verification failed: {str(e)}")
             return False
 
-    def get_signature_from_header(self, header) -> str:
-        return header.get('PAYPAL-AUTH-ALGO', '')
-
-        
+    def get_signature_from_header(self, header: Dict[str, Any]) -> str:
+        return cast(str, header.get("PAYPAL-AUTH-ALGO", ""))

@@ -1,0 +1,5 @@
+export enum ItemType {
+    ONE_TIME_PAYMENT = 'ONE_TIME_PAYMENT',
+    SUBSCRIPTION = 'SUBSCRIPTION',
+    UNKNOWN = 'UNKNOWN'
+} 

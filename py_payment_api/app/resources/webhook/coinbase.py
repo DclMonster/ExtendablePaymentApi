@@ -1,139 +1,188 @@
-from flask_restful import Resource
-from flask import request, jsonify
-from payment_api.app.services import payment_service, coinbase_subscription_service
-from payment_api.app.enums import PaymentProvider
-from payment_api.app.verifiers import coinbase_verifier
-import requests
+from flask_restful import Resource # type: ignore
+from flask import request
+from ...services import PaymentProvider
+from ...verifiers import coinbase_verifier
+from ...services.forwarder.abstract.forwarder import Forwarder, ForwarderType
+from typing import Dict, Any, Optional, NotRequired, cast, Literal, TypeVar, Generic
+from typing import TypedDict
+from enum import StrEnum
+from ...resources.webhook.abstract.abstract_webhook import AbstractWebhook
+from ...services.store.enum.item_type import ItemType
+from ...services.store.payment.one_time.one_time_payment_data import OneTimePaymentData
+from ...services.store.payment.subscription.subscription_payment_data import SubscriptionPaymentData
+from datetime import datetime
+import json
 
-class CoinbaseWebhook(Resource):
-    """
-    Resource class to handle Coinbase webhook events.
-    """
+ITEM_CATEGORY = TypeVar('ITEM_CATEGORY', bound=StrEnum)
 
-    def __init__(self):
-        self.subscription_service = coinbase_subscription_service
+class CoinbaseWebhookError(Exception):
+    """Base exception for Coinbase webhook errors."""
+    pass
 
-    def post(self):
-        """
-        Handles POST requests for Coinbase webhooks. Verifies the signature and processes the event data.
-        """
-        data = request.get_data(as_text=True)
-        signature = request.headers.get('X-Cc-Webhook-Signature', '')
+class CoinbaseWebhookData(TypedDict):
+    transaction_id: str
+    amount: float
+    currency: str
+    status: Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid']
+    user_id: NotRequired[str]
+    subscription_id: NotRequired[str]
 
-        if not coinbase_verifier.verify_signature(data, signature):
-            return {'status': 'error', 'message': 'Invalid signature'}, 400
-
-        event_data = request.json
-        if not event_data:
-            return {'status': 'error', 'message': 'No event data provided'}, 400
-        self.process_event(event_data)
-        return {'status': 'success'}, 200
-
-    def process_event(self, event_data: dict):
-        """
-        Processes the Coinbase event data and executes registered actions.
-
+class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookData, ITEM_CATEGORY]):
+    """Resource class to handle Coinbase webhook events."""
+    
+    def __init__(self, forwarder: Forwarder) -> None:
+        """Initialize the webhook handler.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data received from Coinbase.
+        forwarder : Forwarder
+            The forwarder for webhook events
         """
-        print("Received Coinbase event:", event_data)
-        event_type = event_data.get('type')
-        signature = request.headers.get('X-Coinbase-Signature')
-        if not signature:
-            return {'status': 'error', 'message': 'Signature not provided'}, 400
-        if not coinbase_verifier.verify_signature(event_data, signature):
-            return {'status': 'error', 'message': 'Signature verification failed'}, 400
-        if event_type == 'charge:created':
-            self.handle_charge_created(event_data)
-        elif event_type == 'charge:confirmed':
-            self.handle_charge_confirmed(event_data)
-        elif event_type == 'charge:failed':
-            self.handle_charge_failed(event_data)
-        else:
-            parsed_data = self.parse_event_data(event_data)
-            payment_service.execute_actions(PaymentProvider.COINBASE, parsed_data)
+        super().__init__(
+            provider_type=PaymentProvider.COINBASE,
+            verifier=coinbase_verifier,
+            forwarder=forwarder
+        )
 
-    def handle_subscription_created(self, event_data: dict):
-        """
-        Handles subscription creation events.
-
+    def parse_event_data(self, event_data: str) -> CoinbaseWebhookData:
+        """Parse the Coinbase API event data.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data for the subscription creation.
-        """
-        user_id = event_data.get('user_id')
-        subscription_data = event_data.get('subscription_data', {})
-        self.subscription_service.add_subscription(PaymentProvider.COINBASE, user_id, subscription_data)
-
-    def handle_subscription_canceled(self, event_data: dict):
-        """
-        Handles subscription cancellation events.
-
-        Parameters
-        ----------
-        event_data : dict
-            The event data for the subscription cancellation.
-        """
-        user_id = event_data.get('user_id')
-        # Implement logic to handle subscription cancellation
-
-    def parse_event_data(self, event_data: dict) -> dict:
-        """
-        Parses the event data to extract relevant information.
-
-        Parameters
-        ----------
-        event_data : dict
-            The raw event data.
-
+        event_data : str
+            Raw event data from Coinbase API
+            
         Returns
         -------
-        dict
-            Parsed event data with relevant fields.
+        CoinbaseWebhookData
+            Parsed event data
+            
+        Raises
+        ------
+        CoinbaseWebhookError
+            If required fields are missing
         """
-        parsed_data = {
-            'transaction_id': event_data.get('id'),
-            'amount': event_data.get('amount', {}).get('amount'),
-            'currency': event_data.get('amount', {}).get('currency'),
-            'status': event_data.get('status'),
-        }
-        return parsed_data 
+        try:
+            data = json.loads(event_data)
+            if not data:
+                raise CoinbaseWebhookError("No JSON data in request")
+                
+            # Coinbase API specific field mapping
+            event = data.get('event', {})
+            event_type = event.get('type')
+            charge_data = event.get('data', {})
+            
+            # Required fields check
+            required_fields = ['code']
+            missing_fields = [field for field in required_fields if field not in charge_data]
+            if missing_fields:
+                raise CoinbaseWebhookError(f"Missing required fields: {', '.join(missing_fields)}")
+                
+            # Extract pricing information
+            pricing = charge_data.get('pricing', {}).get('local', {})
+            
+            # Map Coinbase API fields to our webhook data format
+            status = self._map_status(event_type, charge_data.get('status', ''))
+            if status not in ('webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'):
+                status = 'webhook_recieved'
+                
+            return {
+                'transaction_id': charge_data['code'],
+                'amount': float(pricing.get('amount', 0.0)),
+                'currency': pricing.get('currency', 'USD'),
+                'status': cast(Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'], status),
+                'user_id': charge_data.get('metadata', {}).get('user_id', ''),
+                'subscription_id': charge_data.get('metadata', {}).get('subscription_id', '')
+            }
+        except (ValueError, KeyError) as e:
+            raise CoinbaseWebhookError(f"Error parsing event data: {str(e)}")
 
-    def handle_charge_created(self, event_data: dict):
-        """
-        Handles charge creation events.
-
+    def _map_status(self, event_type: str, status: str) -> str:
+        """Map Coinbase API status to our internal status.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data for the charge creation.
+        event_type : str
+            The event type from Coinbase API
+        status : str
+            The status from Coinbase API
+            
+        Returns
+        -------
+        str
+            Our internal status representation
         """
-        print("Charge created:", event_data)
-        # Implement logic to handle charge creation
+        if event_type == 'charge:created':
+            return 'webhook_recieved'
+        elif event_type == 'charge:confirmed' and status == 'completed':
+            return 'paid'
+        elif event_type == 'charge:failed':
+            return 'webhook_recieved'
+        elif event_type == 'charge:delayed':
+            return 'sent_to_processor'
+        elif event_type == 'charge:pending':
+            return 'sent_to_websocket'
+        elif event_type == 'charge:resolved':
+            return 'paid'
+        else:
+            return 'webhook_recieved'
 
-    def handle_charge_confirmed(self, event_data: dict):
-        """
-        Handles charge confirmation events.
-
+    def _item_name_provider(self, event_data: CoinbaseWebhookData) -> str:
+        """Get the item name from the provider.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data for the charge confirmation.
+        event_data : CoinbaseWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        str
+            The item name
         """
-        print("Charge confirmed:", event_data)
-        # Implement logic to handle charge confirmation
+        return 'Coinbase Payment'
 
-    def handle_charge_failed(self, event_data: dict):
-        """
-        Handles charge failure events.
-
+    def _get_one_time_payment_data(self, event_data: CoinbaseWebhookData) -> OneTimePaymentData[ITEM_CATEGORY]:
+        """Get one-time payment data from the event data.
+        
         Parameters
         ----------
-        event_data : dict
-            The event data for the charge failure.
+        event_data : CoinbaseWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        OneTimePaymentData
+            The one-time payment data
         """
-        print("Charge failed:", event_data)
-        # Implement logic to handle charge failure 
+        return OneTimePaymentData(
+            user_id=event_data['user_id'],
+            item_category=cast(ITEM_CATEGORY, ItemType.ONE_TIME_PAYMENT),
+            purchase_id=event_data['transaction_id'],
+            item_name=self._item_name_provider(event_data),
+            time_bought=datetime.now().isoformat(),
+            status=event_data['status'],
+            quantity=1
+        )
+
+    def _get_subscription_payment_data(self, event_data: CoinbaseWebhookData) -> SubscriptionPaymentData[ITEM_CATEGORY]:
+        """Get subscription payment data from the event data.
+        
+        Parameters
+        ----------
+        event_data : CoinbaseWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        SubscriptionPaymentData
+            The subscription payment data
+        """
+        return SubscriptionPaymentData(
+            user_id=event_data['user_id'],
+            item_category=cast(ITEM_CATEGORY, ItemType.SUBSCRIPTION),
+            purchase_id=event_data['transaction_id'],
+            item_name=self._item_name_provider(event_data),
+            time_bought=datetime.now().isoformat(),
+            status=event_data['status']
+        ) 

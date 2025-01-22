@@ -1,7 +1,7 @@
-import { CoinSubWebhook } from './coinsub';
-import { PaypalWebhook } from './paypal';
-import { GoogleWebhook } from './google';
-import { AppleWebhook } from './apple';
-import { CoinbaseWebhook } from './coinbase';
+import { AppleWebhook } from './AppleWebhook';
+import { CoinbaseWebhook } from './CoinbaseWebhook';
+import { CoinSubWebhook } from './CoinSubWebhook';
+import { GoogleWebhook } from './GoogleWebhook';
+import { PaypalWebhook } from './PaypalWebhook';
 
-export { CoinSubWebhook, PaypalWebhook, GoogleWebhook, AppleWebhook, CoinbaseWebhook };
+export { AppleWebhook, CoinbaseWebhook, CoinSubWebhook, GoogleWebhook, PaypalWebhook };

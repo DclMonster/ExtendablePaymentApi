@@ -1,25 +1,32 @@
 import jwt
 import os
+from typing import Any, Dict, Optional
 from .abstract.signature_verifier import SignatureVerifier
 
 class GoogleVerifier(SignatureVerifier):
     """
     Verifier class for Google webhook signatures.
     """
+    _secret: str
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the verifier with the public key from environment variables.
+        
+        Raises
+        ------
+        ValueError
+            If the required environment variable is not set.
         """
-        super('GOOGLE_PUBLIC_KEY')
+        super().__init__('GOOGLE_PUBLIC_KEY')
 
-    def verify_signature(self, data: str, signature: str) -> bool:
+    def verify_signature(self, data: Dict[str, Any], signature: str) -> bool:
         """
         Verifies the signature of the webhook request.
 
         Parameters
         ----------
-        data : str
+        data : Dict[str, Any]
             The signed payload from the event data.
         signature : str
             The signature to verify.
@@ -30,25 +37,23 @@ class GoogleVerifier(SignatureVerifier):
             True if the signature is valid, False otherwise.
         """
         try:
-            decoded = jwt.decode(signature, self._secret, algorithms=['RS256'])
+            jwt.decode(signature, self._secret, algorithms=['RS256'])
             return True
-        except jwt.exceptions.InvalidSignatureError:
-            return False
-        except jwt.exceptions.DecodeError:
+        except (jwt.exceptions.InvalidSignatureError, jwt.exceptions.DecodeError):
             return False
 
-    def get_signature_from_header(self, header) -> str:
+    def get_signature_from_header(self, header: Dict[str, str]) -> str:
         """
         Extracts the signature from the header.
 
         Parameters
         ----------
-        header : Any
+        header : Dict[str, Any]
             The header containing the signature.
 
         Returns
         -------
-        str
-            The extracted signature.
+        Optional[str]
+            The extracted signature, or None if not found.
         """
-        return header.get('Signature', '') 
+        return header.get('Signature','') 

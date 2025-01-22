@@ -1,0 +1,7 @@
+export enum PurchaseStatus {
+    PENDING = 'PENDING',
+    PROCESSING = 'PROCESSING',
+    COMPLETED = 'COMPLETED',
+    FAILED = 'FAILED',
+    SENT_TO_WEBSOCKET = 'SENT_TO_WEBSOCKET'
+} 

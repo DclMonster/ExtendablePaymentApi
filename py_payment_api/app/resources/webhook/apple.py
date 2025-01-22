@@ -1,88 +1,180 @@
-from flask_restful import Resource, reqparse # type: ignore
+from flask_restful import Resource # type: ignore
 from flask import request
-from ...services.store.payment.subscription_collection_service import SubscriptionCollectionService
-from ...enums import PaymentProvider
+from ...services import PaymentProvider
 from ...verifiers import apple_verifier
-from typing import Dict, Any, Tuple
+from ...services.forwarder.abstract.forwarder import Forwarder, ForwarderType
+from typing import Dict, Any, Optional, NotRequired, cast, Literal, TypeVar, Generic
+from typing import TypedDict
+from enum import StrEnum
 from ...resources.webhook.abstract.abstract_webhook import AbstractWebhook
+from ...services.store.enum.item_type import ItemType
+from ...services.store.payment.one_time.one_time_payment_data import OneTimePaymentData
+from ...services.store.payment.subscription.subscription_payment_data import SubscriptionPaymentData
+from datetime import datetime
+import json
 
-webhook_args = reqparse.RequestParser()
-webhook_args.add_argument('signedPayload', type=str, required=True, help='The signed payload from Apple')
+ITEM_CATEGORY = TypeVar('ITEM_CATEGORY', bound=StrEnum)
 
+class AppleWebhookError(Exception):
+    """Base exception for Apple webhook errors."""
+    pass
 
-def verify_apple_signature(jws: str) -> bool:
-    """
-    Verify the signature of the Apple webhook event.
+class AppleWebhookData(TypedDict):
+    transaction_id: str
+    amount: float
+    currency: str
+    status: Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid']
+    user_id: NotRequired[str]
+    subscription_id: NotRequired[str]
 
-    Parameters
-    ----------
-    jws : str
-        The signed payload from Apple.
-
-    Returns
-    -------
-    bool
-        True if the signature is valid, False otherwise.
-    """
-    return apple_verifier.verify_signature(jws)
-
-
-def process_apple_event(event_data: dict, is_one_time_payment: bool):
-    """
-    Process the Apple event data and execute registered actions.
-
-    Parameters
-    ----------
-    event_data : dict
-        The event data received from Apple.
-    is_one_time_payment : bool
-        Indicates if the event is a one-time payment.
-    """
-    print("Received Apple event:", event_data)
-    parsed_data = parse_apple_event_data(event_data)
-    if is_one_time_payment:
-        payment_service.on_apple_payment(AppleData(
-            transaction_id=parsed_data.get('transaction_id', ""),
-            amount=parsed_data.get('amount', 0.0),
-            currency=parsed_data.get('currency', ""),
-            status=parsed_data.get('status', "")
-        ))
-    else:
-        provider_subscription_service.add_subscription(
-            subscription=AppleSubscriptionData(
-                provider=PaymentProvider.APPLE.value,
-                user_id=parsed_data.get('user_id', ""),
-                subscription_data=parsed_data
-            )
+class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITEM_CATEGORY]):
+    """Resource class to handle Apple webhook events."""
+    
+    def __init__(self, forwarder: Forwarder) -> None:
+        """Initialize the webhook handler.
+        
+        Parameters
+        ----------
+        forwarder : Forwarder
+            The forwarder for webhook events
+        """
+        super().__init__(
+            provider_type=PaymentProvider.APPLE,
+            verifier=apple_verifier,
+            forwarder=forwarder
         )
 
+    def parse_event_data(self, event_data: str) -> AppleWebhookData:
+        """Parse the Apple Store API event data.
+        
+        Parameters
+        ----------
+        event_data : str
+            Raw event data from Apple Store API
+            
+        Returns
+        -------
+        AppleWebhookData
+            Parsed event data
+            
+        Raises
+        ------
+        AppleWebhookError
+            If required fields are missing
+        """
+        try:
+            data = json.loads(event_data)
+            if not data:
+                raise AppleWebhookError("No JSON data in request")
+                
+            # Apple Store API specific field mapping
+            notification_type = data.get('notification_type')
+            receipt_info = data.get('unified_receipt', {}).get('latest_receipt_info', [{}])[0]
+            
+            # Required fields check
+            required_fields = ['transaction_id', 'price', 'currency']
+            missing_fields = [field for field in required_fields if field not in receipt_info]
+            if missing_fields:
+                raise AppleWebhookError(f"Missing required fields: {', '.join(missing_fields)}")
+                
+            # Map Apple Store API fields to our webhook data format
+            status = self._map_status(notification_type, '')
+            if status not in ('webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'):
+                status = 'webhook_recieved'
+                
+            return {
+                'transaction_id': receipt_info['transaction_id'],
+                'amount': float(receipt_info.get('price', 0.0)),
+                'currency': receipt_info.get('currency', 'USD'),
+                'status': cast(Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'], status),
+                'user_id': data.get('user_id', ''),
+                'subscription_id': receipt_info.get('product_id', '')
+            }
+        except (ValueError, KeyError) as e:
+            raise AppleWebhookError(f"Error parsing event data: {str(e)}")
 
-def parse_apple_event_data(event_data: dict) -> Dict[str, Any]:
-    """
-    Parse the Apple event data to extract relevant information.
+    def _map_status(self, notification_type: str, status: str) -> str:
+        """Map Apple Store API status to our internal status.
+        
+        Parameters
+        ----------
+        notification_type : str
+            The notification type from Apple Store API
+        status : str
+            The status from Apple Store API
+            
+        Returns
+        -------
+        str
+            Our internal status representation
+        """
+        if notification_type == 'INITIAL_BUY':
+            return 'paid'
+        elif notification_type == 'DID_RENEW':
+            return 'paid'
+        elif notification_type == 'CANCEL':
+            return 'sent_to_processor'
+        elif notification_type == 'DID_FAIL_TO_RENEW':
+            return 'webhook_recieved'
+        else:
+            return 'webhook_recieved'
 
-    Parameters
-    ----------
-    event_data : dict
-        The raw event data.
+    def _item_name_provider(self, event_data: AppleWebhookData) -> str:
+        """Get the item name from the provider.
+        
+        Parameters
+        ----------
+        event_data : AppleWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        str
+            The item name
+        """
+        return 'Apple Payment'
 
-    Returns
-    -------
-    dict
-        Parsed event data with relevant fields.
-    """
-    return {
-        'transaction_id': event_data.get('transactionId'),
-        'amount': event_data.get('amount'),
-        'currency': event_data.get('currency'),
-        'status': event_data.get('status'),
-    }
+    def _get_one_time_payment_data(self, event_data: AppleWebhookData) -> OneTimePaymentData[ITEM_CATEGORY]:
+        """Get one-time payment data from the event data.
+        
+        Parameters
+        ----------
+        event_data : AppleWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        OneTimePaymentData
+            The one-time payment data
+        """
+        return OneTimePaymentData(
+            user_id=event_data['user_id'],
+            item_category=cast(ITEM_CATEGORY, ItemType.ONE_TIME_PAYMENT),
+            purchase_id=event_data['transaction_id'],
+            item_name=self._item_name_provider(event_data),
+            time_bought=datetime.now().isoformat(),
+            status=event_data['status'],
+            quantity=1
+        )
 
-
-class AppleWebhook(AbstractWebhook, Resource):
-    """
-    Resource class to handle Apple webhook events.
-    """
-
-    def __init__(self, item_collection_service: ItemCollectionService):
-        super().__init__(apple_verifier.verify_signature)
+    def _get_subscription_payment_data(self, event_data: AppleWebhookData) -> SubscriptionPaymentData[ITEM_CATEGORY]:
+        """Get subscription payment data from the event data.
+        
+        Parameters
+        ----------
+        event_data : AppleWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        SubscriptionPaymentData
+            The subscription payment data
+        """
+        return SubscriptionPaymentData(
+            user_id=event_data['user_id'],
+            item_category=cast(ITEM_CATEGORY, ItemType.SUBSCRIPTION),
+            purchase_id=event_data['transaction_id'],
+            item_name=self._item_name_provider(event_data),
+            time_bought=datetime.now().isoformat(),
+            status=event_data['status']
+        )
