@@ -1,81 +1,155 @@
-## Key Components
+# Extendable Payment API
 
-- **Resources**: Handle incoming webhook requests and process them.
-  - `CoinbaseWebhook`: Manages Coinbase webhook events.
-  - `AppleWebhook`: Manages Apple webhook events.
-  - `GoogleWebhook`: Manages Google webhook events.
+A flexible payment API supporting multiple payment providers, implemented in both Python and TypeScript.
 
-- **Services**: Provides business logic and action management.
-  - `PaymentService`: Manages registration and execution of actions for different payment providers.
-
-- **Verifiers**: Ensure the authenticity of webhook requests.
-  - `CoinbaseVerifier`: Verifies Coinbase webhook signatures.
-  - `AppleVerifier`: Verifies Apple webhook signatures.
-  - `GoogleVerifier`: Verifies Google webhook signatures.
-
-## Setup
-
-### Prerequisites
-
-- Python 3.7+
-- Flask
-- Flask-RESTful
-- PyJWT
-- pytest
-- python-dotenv (for local development)
-
-### Installation
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/yourusername/payment-api.git
-   cd payment-api
-   ```
-
-2. Install the dependencies:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Set up environment variables:
-
-   Create a `.env` file in the root directory and add the following:
-
-   ```plaintext
-   COINBASE_WEBHOOK_SECRET=your_coinbase_secret
-   APPLE_PUBLIC_KEY=your_apple_public_key
-   GOOGLE_PUBLIC_KEY=your_google_public_key
-   ```
-
-### Running the Application
-
-To start the application, run:
+## Project Structure
 
 ```
+ExtendablePaymentApi/
+├── py_payment_api/         # Python implementation
+│   ├── app/               # Core Python application code
+│   ├── tests/             # Python tests (unit, integration, regression)
+│   ├── docs/              # Python documentation
+│   ├── requirements.txt   # Python dependencies
+│   ├── setup.py          # Python package configuration
+│   ├── pyproject.toml    # Python build system configuration
+│   ├── pytest.ini        # Python test configuration
+│   └── README.md         # Python-specific documentation
+│
+├── tsPaymentApi/          # TypeScript implementation
+│   ├── src/              # Core TypeScript application code
+│   ├── tests/            # TypeScript tests (unit, integration, regression)
+│   ├── docs/             # TypeScript documentation
+│   ├── package.json      # TypeScript dependencies and scripts
+│   ├── tsconfig.json     # TypeScript configuration
+│   ├── jest.config.js    # Jest test configuration
+│   └── README.md         # TypeScript-specific documentation
+│
+├── .github/              # GitHub Actions workflows
+│   └── workflows/        # CI/CD pipeline configurations
+│
+└── README.md            # Root project documentation
+```
 
-Ensure all required environment variables are set before starting the application.
+## Getting Started
+
+This project contains two independent implementations of the same API:
+
+### Python Implementation
+```bash
+cd py_payment_api
+make install  # Install dependencies
+make dev      # Start development server
+```
+
+### TypeScript Implementation
+```bash
+cd tsPaymentApi
+npm install   # Install dependencies
+npm run dev   # Start development server
+```
+
+## Development
+
+Each implementation has its own development workflow and tools. Please refer to the respective README files in each directory:
+
+- [Python Implementation](py_payment_api/README.md)
+- [TypeScript Implementation](tsPaymentApi/README.md)
 
 ## Testing
 
-Run the tests using `pytest`:
+Both implementations include comprehensive test suites:
 
+### Python Tests
+```bash
+cd py_payment_api
+make test              # Run all tests
+make test-unit        # Run unit tests
+make test-integration # Run integration tests
+make test-regression  # Run regression tests
+make test-performance # Run performance tests
 ```
 
-## Usage
+### TypeScript Tests
+```bash
+cd tsPaymentApi
+npm test              # Run all tests
+npm run test:unit     # Run unit tests
+npm run test:integration # Run integration tests
+npm run test:regression # Run regression tests
+npm run test:performance # Run performance tests
+```
 
-- **Webhook Endpoints**:
-  - `/webhook/coinbase`: Endpoint for Coinbase webhooks.
-  - `/webhook/apple`: Endpoint for Apple webhooks.
-  - `/webhook/google`: Endpoint for Google webhooks.
+## Documentation
 
-- **Action Registration**: Use the `PaymentService` to register actions that should be executed when a webhook event is received.
+Each implementation maintains its own documentation:
+
+### Python Documentation
+```bash
+cd py_payment_api
+make docs      # Build documentation
+make docs-serve # Serve documentation locally
+```
+
+### TypeScript Documentation
+```bash
+cd tsPaymentApi
+npm run docs   # Build documentation
+npm run docs:serve # Serve documentation locally
+```
 
 ## Contributing
 
-Contributions are welcome! Please fork the repository and submit a pull request for any improvements or bug fixes.
+Please read the contribution guidelines in each implementation's directory before submitting pull requests.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Supported Payment Providers
+
+### WooCommerce Integration
+
+The payment API supports WooCommerce webhooks for handling orders and subscriptions. 
+
+#### Configuration
+
+Set the following environment variables:
+```
+WOOCOMMERCE_CONSUMER_KEY=your_consumer_key
+WOOCOMMERCE_CONSUMER_SECRET=your_consumer_secret
+WOOCOMMERCE_WEBHOOK_SECRET=your_webhook_secret
+WOOCOMMERCE_API_URL=your_store_url
+```
+
+#### Setup Steps:
+
+1. In WooCommerce admin panel:
+   - Go to WooCommerce > Settings > Advanced > REST API
+   - Click "Add Key" to create new API credentials
+   - Set permissions to "Read/Write"
+   - Copy the Consumer Key and Consumer Secret
+
+2. Configure webhooks:
+   - Go to WooCommerce > Settings > Advanced > Webhooks
+   - Create webhooks for:
+     - Order created/updated
+     - Subscription created/renewed
+     - Subscription cancelled
+   - Set delivery URL to your API endpoint
+   - Copy the Webhook Secret
+
+3. Update environment variables with the copied values
+
+#### Supported Events:
+- `order.created`: New order created
+- `order.updated`: Order status updated
+- `subscription.created`: New subscription created
+- `subscription.renewed`: Subscription renewed
+- `subscription.cancelled`: Subscription cancelled
+
+#### Testing:
+Use WooCommerce webhook delivery system:
+1. Go to WooCommerce > Settings > Advanced > Webhooks
+2. Select a webhook
+3. Click "Send test" to deliver a test payload

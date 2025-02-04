@@ -1,12 +1,18 @@
-import { BasePaymentData } from './BasePaymentData';
-import { OneTimePaymentData } from '../one_time/OneTimePaymentData';
-import { SubscriptionPaymentData } from '../subscription/SubscriptionPaymentData';
+import { ItemCollectionService } from './ItemCollectionService';
 
-export interface PaymentHandler<ITEM_CATEGORY extends string, T extends BasePaymentData<ITEM_CATEGORY>> {
-    readonly category: ITEM_CATEGORY;
-    handlePayment(paymentData: T): Promise<void>;
+export interface BasePaymentData<TCategory extends string> {
+    status: string;
+    itemCategory: TCategory;
 }
 
-export interface OneTimePaymentHandler<ITEM_CATEGORY extends string> extends PaymentHandler<ITEM_CATEGORY, OneTimePaymentData<ITEM_CATEGORY>> {}
+export abstract class PaymentHandler<TCategory extends string, TPaymentData extends BasePaymentData<TCategory>> {
+    protected readonly category: TCategory;
+    protected readonly logger?: ItemCollectionService<TCategory>;
 
-export interface SubscriptionPaymentHandler<ITEM_CATEGORY extends string> extends PaymentHandler<ITEM_CATEGORY, SubscriptionPaymentData<ITEM_CATEGORY>> {} 
+    constructor(category: TCategory, logger?: ItemCollectionService<TCategory>) {
+        this.category = category;
+        this.logger = logger;
+    }
+
+    abstract onPayment(payment: TPaymentData): Promise<void>;
+} 

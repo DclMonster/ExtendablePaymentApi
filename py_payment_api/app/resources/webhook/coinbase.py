@@ -1,3 +1,4 @@
+"""Coinbase Commerce webhook handler."""
 from flask_restful import Resource # type: ignore
 from flask import request
 from ...services import PaymentProvider
@@ -26,9 +27,12 @@ class CoinbaseWebhookData(TypedDict):
     status: Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid']
     user_id: NotRequired[str]
     subscription_id: NotRequired[str]
+    charge_code: NotRequired[str]  # Coinbase Commerce charge code
+    payment_method: NotRequired[str]  # Payment method used (crypto currency)
+    confirmed_at: NotRequired[str]  # Confirmation timestamp
 
 class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookData, ITEM_CATEGORY]):
-    """Resource class to handle Coinbase webhook events."""
+    """Resource class to handle Coinbase Commerce webhook events."""
     
     def __init__(self, forwarder: Forwarder) -> None:
         """Initialize the webhook handler.
@@ -45,12 +49,12 @@ class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookDat
         )
 
     def parse_event_data(self, event_data: str) -> CoinbaseWebhookData:
-        """Parse the Coinbase API event data.
+        """Parse the Coinbase Commerce API event data.
         
         Parameters
         ----------
         event_data : str
-            Raw event data from Coinbase API
+            Raw event data from Coinbase Commerce API
             
         Returns
         -------
@@ -67,13 +71,13 @@ class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookDat
             if not data:
                 raise CoinbaseWebhookError("No JSON data in request")
                 
-            # Coinbase API specific field mapping
+            # Coinbase Commerce API specific field mapping
             event = data.get('event', {})
             event_type = event.get('type')
             charge_data = event.get('data', {})
             
             # Required fields check
-            required_fields = ['code']
+            required_fields = ['code', 'pricing']
             missing_fields = [field for field in required_fields if field not in charge_data]
             if missing_fields:
                 raise CoinbaseWebhookError(f"Missing required fields: {', '.join(missing_fields)}")
@@ -81,31 +85,48 @@ class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookDat
             # Extract pricing information
             pricing = charge_data.get('pricing', {}).get('local', {})
             
-            # Map Coinbase API fields to our webhook data format
+            # Extract payment information if available
+            payments = charge_data.get('payments', [])
+            latest_payment = payments[-1] if payments else {}
+            
+            # Map Coinbase Commerce API fields to our webhook data format
             status = self._map_status(event_type, charge_data.get('status', ''))
             if status not in ('webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'):
                 status = 'webhook_recieved'
                 
-            return {
+            webhook_data: CoinbaseWebhookData = {
                 'transaction_id': charge_data['code'],
                 'amount': float(pricing.get('amount', 0.0)),
                 'currency': pricing.get('currency', 'USD'),
                 'status': cast(Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'], status),
                 'user_id': charge_data.get('metadata', {}).get('user_id', ''),
-                'subscription_id': charge_data.get('metadata', {}).get('subscription_id', '')
+                'subscription_id': charge_data.get('metadata', {}).get('subscription_id', ''),
+                'charge_code': charge_data.get('code'),
+                'payment_method': latest_payment.get('network'),
+                'confirmed_at': latest_payment.get('confirmed_at')
             }
+            
+            # Verify the charge with Coinbase Commerce API
+            if webhook_data['charge_code']:
+                try:
+                    self._verifier.verify_charge(webhook_data['charge_code'])
+                except ValueError as e:
+                    print(f"Warning: Charge verification failed: {str(e)}")
+                    
+            return webhook_data
+            
         except (ValueError, KeyError) as e:
             raise CoinbaseWebhookError(f"Error parsing event data: {str(e)}")
 
     def _map_status(self, event_type: str, status: str) -> str:
-        """Map Coinbase API status to our internal status.
+        """Map Coinbase Commerce API status to our internal status.
         
         Parameters
         ----------
         event_type : str
-            The event type from Coinbase API
+            The event type from Coinbase Commerce API
         status : str
-            The status from Coinbase API
+            The status from Coinbase Commerce API
             
         Returns
         -------
@@ -114,7 +135,7 @@ class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookDat
         """
         if event_type == 'charge:created':
             return 'webhook_recieved'
-        elif event_type == 'charge:confirmed' and status == 'completed':
+        elif event_type == 'charge:confirmed' and status == 'COMPLETED':
             return 'paid'
         elif event_type == 'charge:failed':
             return 'webhook_recieved'
@@ -140,7 +161,7 @@ class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookDat
         str
             The item name
         """
-        return 'Coinbase Payment'
+        return f"Coinbase Payment ({event_data.get('payment_method', 'crypto')})"
 
     def _get_one_time_payment_data(self, event_data: CoinbaseWebhookData) -> OneTimePaymentData[ITEM_CATEGORY]:
         """Get one-time payment data from the event data.
@@ -160,7 +181,7 @@ class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookDat
             item_category=cast(ITEM_CATEGORY, ItemType.ONE_TIME_PAYMENT),
             purchase_id=event_data['transaction_id'],
             item_name=self._item_name_provider(event_data),
-            time_bought=datetime.now().isoformat(),
+            time_bought=event_data.get('confirmed_at') or datetime.now().isoformat(),
             status=event_data['status'],
             quantity=1
         )
@@ -183,6 +204,6 @@ class CoinbaseWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinbaseWebhookDat
             item_category=cast(ITEM_CATEGORY, ItemType.SUBSCRIPTION),
             purchase_id=event_data['transaction_id'],
             item_name=self._item_name_provider(event_data),
-            time_bought=datetime.now().isoformat(),
+            time_bought=event_data.get('confirmed_at') or datetime.now().isoformat(),
             status=event_data['status']
         ) 

@@ -1,7 +1,7 @@
-export enum PaymentProvider {
-    COINBASE = "coinbase",
-    APPLE = "apple",
-    GOOGLE = "google",
-    PAYPAL = "paypal",
-    COINSUB = "coinsub"
+export enum PurchaseStatus {
+    PENDING = 'pending',
+    COMPLETED = 'completed',
+    FAILED = 'failed',
+    REFUNDED = 'refunded',
+    CANCELLED = 'cancelled'
 } 

@@ -1,0 +1,42 @@
+{
+    "version": "0.2",
+    "language": "en",
+    "words": [
+        "eslint",
+        "prettier",
+        "typedoc",
+        "tsconfig",
+        "tsbuildinfo",
+        "tslib",
+        "esbuild",
+        "nestjs",
+        "typeorm",
+        "fastify",
+        "middlewares",
+        "websocket",
+        "websockets",
+        "jsonwebtoken",
+        "openapi",
+        "swagger",
+        "cors",
+        "dotenv",
+        "axios",
+        "zlib",
+        "crypto",
+        "bcrypt",
+        "uuidv4",
+        "datetime",
+        "luxon"
+    ],
+    "flagWords": [],
+    "ignorePaths": [
+        "node_modules/**",
+        "dist/**",
+        "coverage/**",
+        ".git/**",
+        "**/*.js.map",
+        "**/*.d.ts",
+        "**/*.js",
+        "package-lock.json"
+    ]
+} 

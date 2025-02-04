@@ -26,6 +26,13 @@ class AppleWebhookData(TypedDict):
     status: Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid']
     user_id: NotRequired[str]
     subscription_id: NotRequired[str]
+    product_id: NotRequired[str]  # Product ID from App Store
+    receipt_data: NotRequired[str]  # Receipt data for verification
+    bundle_id: NotRequired[str]  # App bundle ID
+    is_subscription: NotRequired[bool]  # Whether this is a subscription
+    metadata: NotRequired[Dict[str, Any]]  # Additional metadata
+    environment: NotRequired[str]  # Sandbox or Production
+    is_retryable: NotRequired[bool]  # Whether the notification can be retried
 
 class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITEM_CATEGORY]):
     """Resource class to handle Apple webhook events."""
@@ -70,6 +77,7 @@ class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITE
             # Apple Store API specific field mapping
             notification_type = data.get('notification_type')
             receipt_info = data.get('unified_receipt', {}).get('latest_receipt_info', [{}])[0]
+            environment = data.get('environment', 'Production')
             
             # Required fields check
             required_fields = ['transaction_id', 'price', 'currency']
@@ -78,18 +86,55 @@ class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITE
                 raise AppleWebhookError(f"Missing required fields: {', '.join(missing_fields)}")
                 
             # Map Apple Store API fields to our webhook data format
-            status = self._map_status(notification_type, '')
+            status = self._map_status(notification_type, receipt_info.get('status', ''))
             if status not in ('webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'):
                 status = 'webhook_recieved'
                 
-            return {
+            webhook_data: AppleWebhookData = {
                 'transaction_id': receipt_info['transaction_id'],
                 'amount': float(receipt_info.get('price', 0.0)),
                 'currency': receipt_info.get('currency', 'USD'),
                 'status': cast(Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'], status),
                 'user_id': data.get('user_id', ''),
-                'subscription_id': receipt_info.get('product_id', '')
+                'subscription_id': receipt_info.get('product_id', ''),
+                'product_id': receipt_info.get('product_id', ''),
+                'receipt_data': data.get('latest_receipt', ''),
+                'bundle_id': receipt_info.get('bid', ''),
+                'is_subscription': bool(receipt_info.get('expires_date', '')),
+                'metadata': {
+                    'notification_type': notification_type,
+                    'web_order_line_item_id': receipt_info.get('web_order_line_item_id', ''),
+                    'is_trial_period': receipt_info.get('is_trial_period', 'false') == 'true',
+                    'is_in_intro_offer_period': receipt_info.get('is_in_intro_offer_period', 'false') == 'true',
+                    'original_transaction_id': receipt_info.get('original_transaction_id', ''),
+                    'promotional_offer_id': receipt_info.get('promotional_offer_id', ''),
+                    'offer_code_ref_name': receipt_info.get('offer_code_ref_name', '')
+                },
+                'environment': environment,
+                'is_retryable': data.get('is-retryable', True)
             }
+            
+            # Verify receipt if we have the necessary data
+            if webhook_data.get('receipt_data'):
+                try:
+                    # Verify the receipt
+                    verify_result = self._verifier.verify_receipt(
+                        webhook_data['receipt_data'],
+                        webhook_data['environment'].lower() == 'sandbox'
+                    )
+                    
+                    # Update webhook data with verification results
+                    if verify_result.get('status') == 'success':
+                        webhook_data['metadata'].update({
+                            'verification': verify_result,
+                            'receipt_verification': verify_result.get('receipt', {})
+                        })
+                        
+                except Exception as e:
+                    webhook_data['metadata']['verification_error'] = str(e)
+                    
+            return webhook_data
+            
         except (ValueError, KeyError) as e:
             raise AppleWebhookError(f"Error parsing event data: {str(e)}")
 
@@ -112,10 +157,24 @@ class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITE
             return 'paid'
         elif notification_type == 'DID_RENEW':
             return 'paid'
+        elif notification_type == 'INTERACTIVE_RENEWAL':
+            return 'paid'
+        elif notification_type == 'DID_CHANGE_RENEWAL_PREF':
+            return 'sent_to_processor'
         elif notification_type == 'CANCEL':
+            return 'sent_to_processor'
+        elif notification_type == 'DID_CHANGE_RENEWAL_STATUS':
             return 'sent_to_processor'
         elif notification_type == 'DID_FAIL_TO_RENEW':
             return 'webhook_recieved'
+        elif notification_type == 'PRICE_INCREASE_CONSENT':
+            return 'sent_to_processor'
+        elif notification_type == 'REFUND':
+            return 'sent_to_processor'
+        elif notification_type == 'REVOKE':
+            return 'sent_to_processor'
+        elif notification_type == 'CONSUMPTION_REQUEST':
+            return 'sent_to_processor'
         else:
             return 'webhook_recieved'
 
@@ -132,7 +191,33 @@ class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITE
         str
             The item name
         """
-        return 'Apple Payment'
+        try:
+            receipt_data = event_data.get('metadata', {}).get('receipt_verification', {})
+            if receipt_data:
+                in_app = receipt_data.get('in_app', [{}])[0]
+                product_id = in_app.get('product_id', '')
+                if product_id:
+                    return f"Product: {product_id}"
+            return self._fallback_item_name(event_data)
+        except Exception:
+            return self._fallback_item_name(event_data)
+
+    def _fallback_item_name(self, event_data: AppleWebhookData) -> str:
+        """Fallback method for getting item name when receipt data is not available.
+        
+        Parameters
+        ----------
+        event_data : AppleWebhookData
+            The parsed event data
+            
+        Returns
+        -------
+        str
+            The fallback item name
+        """
+        if event_data.get('is_subscription'):
+            return f"Subscription: {event_data.get('subscription_id', '')}"
+        return f"Product: {event_data.get('product_id', '')}"
 
     def _get_one_time_payment_data(self, event_data: AppleWebhookData) -> OneTimePaymentData[ITEM_CATEGORY]:
         """Get one-time payment data from the event data.
@@ -154,7 +239,14 @@ class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITE
             item_name=self._item_name_provider(event_data),
             time_bought=datetime.now().isoformat(),
             status=event_data['status'],
-            quantity=1
+            quantity=1,
+            metadata={
+                **event_data.get('metadata', {}),
+                'product_id': event_data.get('product_id', ''),
+                'bundle_id': event_data.get('bundle_id', ''),
+                'environment': event_data.get('environment', 'Production'),
+                'is_retryable': event_data.get('is_retryable', True)
+            }
         )
 
     def _get_subscription_payment_data(self, event_data: AppleWebhookData) -> SubscriptionPaymentData[ITEM_CATEGORY]:
@@ -170,11 +262,23 @@ class AppleWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[AppleWebhookData, ITE
         SubscriptionPaymentData
             The subscription payment data
         """
+        verification_data = event_data.get('metadata', {}).get('verification', {})
+        receipt_data = verification_data.get('receipt', {})
+        
         return SubscriptionPaymentData(
             user_id=event_data['user_id'],
             item_category=cast(ITEM_CATEGORY, ItemType.SUBSCRIPTION),
             purchase_id=event_data['transaction_id'],
             item_name=self._item_name_provider(event_data),
             time_bought=datetime.now().isoformat(),
-            status=event_data['status']
+            status=event_data['status'],
+            metadata={
+                **event_data.get('metadata', {}),
+                'subscription_id': event_data.get('subscription_id', ''),
+                'product_id': event_data.get('product_id', ''),
+                'bundle_id': event_data.get('bundle_id', ''),
+                'environment': event_data.get('environment', 'Production'),
+                'is_retryable': event_data.get('is_retryable', True),
+                'receipt_data': receipt_data
+            }
         )

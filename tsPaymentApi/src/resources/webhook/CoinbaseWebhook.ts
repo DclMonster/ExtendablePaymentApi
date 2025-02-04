@@ -1,17 +1,13 @@
 import { AbstractWebhook } from './abstract/AbstractWebhook';
 import { PaymentProvider } from '../../services/PaymentProvider';
-import { SignatureVerifier } from '../../verifiers/SignatureVerifier';
+import { CoinbaseVerifier } from '../../verifiers/CoinbaseVerifier';
 import { Forwarder } from '../../services/forwarder/abstract/Forwarder';
 import { OneTimePaymentData } from '../../services/store/payment/one_time/OneTimePaymentData';
 import { SubscriptionPaymentData } from '../../services/store/payment/subscription/SubscriptionPaymentData';
-import { ItemType } from '../../services/ItemType';
+import { Logger } from '../../utils/Logger';
+import { WebhookError } from '../../errors/WebhookError';
 
-export class CoinbaseWebhookError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = 'CoinbaseWebhookError';
-    }
-}
+export class CoinbaseWebhookError extends WebhookError {}
 
 export enum CoinbaseItemCategory {
     ONE_TIME = 'ONE_TIME',
@@ -24,73 +20,121 @@ interface CoinbaseWebhookData {
     currency: string;
     status: 'webhook_received' | 'sent_to_websocket' | 'sent_to_processor' | 'paid';
     userId?: string;
-    subscriptionId?: string;
+    chargeId?: string;
+    chargeCode?: string;
+    metadata?: Record<string, any>;
+    pricing?: {
+        local: {
+            amount: string;
+            currency: string;
+        };
+        crypto?: {
+            amount: string;
+            currency: string;
+        };
+    };
+    addresses?: Record<string, string>;
+    hostedUrl?: string;
+    expiresAt?: string;
 }
 
 export class CoinbaseWebhook extends AbstractWebhook<CoinbaseWebhookData, CoinbaseItemCategory> {
+    private readonly verifier: CoinbaseVerifier;
+
     constructor(forwarder: Forwarder | null = null) {
+        const verifier = new CoinbaseVerifier();
         super(
             PaymentProvider.COINBASE,
-            // This should be replaced with actual Coinbase signature verification
-            {
-                verifyHeaderSignature: () => {}
-            },
+            verifier,
             forwarder
         );
+        this.verifier = verifier;
     }
 
-    private mapStatus(eventType: string, status: string): string {
+    private mapStatus(eventType: string): string {
         switch (eventType) {
             case 'charge:confirmed':
-                return status === 'completed' ? 'paid' : 'webhook_received';
             case 'charge:resolved':
                 return 'paid';
-            case 'charge:pending':
-                return 'sent_to_websocket';
+            case 'charge:failed':
             case 'charge:delayed':
+            case 'charge:pending':
                 return 'sent_to_processor';
             case 'charge:created':
-            case 'charge:failed':
+                return 'sent_to_websocket';
             default:
                 return 'webhook_received';
         }
     }
 
-    protected parseEventData(eventData: string): CoinbaseWebhookData {
+    protected async parseEventData(eventData: string): Promise<CoinbaseWebhookData> {
         try {
             const data = JSON.parse(eventData);
-            if (!data) {
-                throw new CoinbaseWebhookError('No JSON data in request');
+            if (!data || !data.event) {
+                throw new CoinbaseWebhookError('No JSON data or event in request');
             }
 
-            const event = data.event || {};
-            const eventType = event.type;
-            const chargeData = event.data || {};
+            const event = data.event;
+            const charge = event.data;
 
-            const requiredFields = ['code'];
-            const missingFields = requiredFields.filter(field => !(field in chargeData));
-            if (missingFields.length > 0) {
-                throw new CoinbaseWebhookError(`Missing required fields: ${missingFields.join(', ')}`);
+            if (!charge) {
+                throw new CoinbaseWebhookError('No charge data in event');
             }
 
-            const pricing = chargeData.pricing?.local || {};
-            const status = this.mapStatus(eventType, chargeData.status || '');
+            const status = this.mapStatus(event.type);
 
-            return {
-                transactionId: chargeData.code,
-                amount: parseFloat(pricing.amount || '0'),
-                currency: pricing.currency || 'USD',
+            const webhookData: CoinbaseWebhookData = {
+                transactionId: charge.id,
+                amount: parseFloat(charge.pricing?.local?.amount || '0'),
+                currency: charge.pricing?.local?.currency || 'USD',
                 status: status as CoinbaseWebhookData['status'],
-                userId: chargeData.metadata?.user_id,
-                subscriptionId: chargeData.metadata?.subscription_id
+                userId: charge.metadata?.userId,
+                chargeId: charge.id,
+                chargeCode: charge.code,
+                metadata: {
+                    ...charge.metadata,
+                    eventType: event.type,
+                    timeline: charge.timeline,
+                    payments: charge.payments
+                },
+                pricing: charge.pricing,
+                addresses: charge.addresses,
+                hostedUrl: charge.hosted_url,
+                expiresAt: charge.expires_at
             };
+
+            // Verify the charge
+            try {
+                const verifiedCharge = await this.verifier.verifyCharge(webhookData.chargeId);
+                webhookData.metadata = {
+                    ...webhookData.metadata,
+                    verification: verifiedCharge
+                };
+            } catch (error) {
+                Logger.error('Charge verification error:', error);
+                webhookData.metadata.verificationError = error.message;
+            }
+
+            return webhookData;
         } catch (error) {
-            throw new CoinbaseWebhookError(`Error parsing event data: ${error}`);
+            throw new CoinbaseWebhookError(`Error parsing event data: ${error.message}`);
         }
     }
 
     protected itemNameProvider(eventData: CoinbaseWebhookData): string {
-        return 'Coinbase Payment';
+        try {
+            const verificationData = eventData.metadata?.verification;
+            if (verificationData) {
+                return verificationData.name || this.fallbackItemName(eventData);
+            }
+            return this.fallbackItemName(eventData);
+        } catch (error) {
+            return this.fallbackItemName(eventData);
+        }
+    }
+
+    private fallbackItemName(eventData: CoinbaseWebhookData): string {
+        return `Charge: ${eventData.chargeCode || eventData.chargeId || ''}`;
     }
 
     protected getOneTimePaymentData(eventData: CoinbaseWebhookData): OneTimePaymentData<CoinbaseItemCategory> {
@@ -101,18 +145,39 @@ export class CoinbaseWebhook extends AbstractWebhook<CoinbaseWebhookData, Coinba
             itemName: this.itemNameProvider(eventData),
             timeBought: new Date().toISOString(),
             status: eventData.status,
-            quantity: 1
+            quantity: 1,
+            metadata: {
+                ...eventData.metadata,
+                chargeId: eventData.chargeId,
+                chargeCode: eventData.chargeCode,
+                pricing: eventData.pricing,
+                addresses: eventData.addresses,
+                hostedUrl: eventData.hostedUrl,
+                expiresAt: eventData.expiresAt
+            }
         };
     }
 
     protected getSubscriptionPaymentData(eventData: CoinbaseWebhookData): SubscriptionPaymentData<CoinbaseItemCategory> {
+        const verificationData = eventData.metadata?.verification || {};
+
         return {
             userId: eventData.userId || '',
             itemCategory: CoinbaseItemCategory.SUBSCRIPTION,
             purchaseId: eventData.transactionId,
             itemName: this.itemNameProvider(eventData),
             timeBought: new Date().toISOString(),
-            status: eventData.status
+            status: eventData.status,
+            metadata: {
+                ...eventData.metadata,
+                chargeId: eventData.chargeId,
+                chargeCode: eventData.chargeCode,
+                pricing: eventData.pricing,
+                addresses: eventData.addresses,
+                hostedUrl: eventData.hostedUrl,
+                expiresAt: eventData.expiresAt,
+                verificationData
+            }
         };
     }
 } 

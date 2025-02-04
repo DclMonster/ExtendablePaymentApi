@@ -1,0 +1,31 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["./src/index.ts"],
+  "out": "docs",
+  "name": "Extendable Payment API",
+  "includeVersion": true,
+  "excludePrivate": false,
+  "excludeProtected": false,
+  "excludeExternals": true,
+  "readme": "README.md",
+  "plugin": ["typedoc-plugin-markdown"],
+  "theme": "default",
+  "categorizeByGroup": true,
+  "categoryOrder": [
+    "Payment",
+    "Webhook",
+    "Verification",
+    "Providers",
+    "*"
+  ],
+  "navigation": {
+    "includeGroups": true,
+    "includeCategories": true
+  },
+  "searchInComments": true,
+  "sort": ["source-order"],
+  "validation": {
+    "invalidLink": true,
+    "notDocumented": true
+  }
+} 

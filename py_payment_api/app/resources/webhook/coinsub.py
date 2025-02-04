@@ -26,9 +26,12 @@ class CoinSubWebhookData(TypedDict):
     status: Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid']
     user_id: NotRequired[str]
     subscription_id: NotRequired[str]
+    product_id: NotRequired[str]  # Product ID from Coinsub
+    payment_method: NotRequired[str]  # Payment method used (crypto currency)
+    metadata: NotRequired[Dict[str, Any]]  # Additional metadata from Coinsub
 
 class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData, ITEM_CATEGORY]):
-    """Resource class to handle CoinSub webhook events."""
+    """Resource class to handle CoinSub webhook events with enhanced functionality."""
     
     def __init__(self, forwarder: Forwarder) -> None:
         """Initialize the webhook handler.
@@ -70,6 +73,7 @@ class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData,
             # CoinSub API specific field mapping
             event_type = data.get('event_type')
             subscription = data.get('subscription', {})
+            payment = data.get('payment', {})
             
             # Required fields check
             required_fields = ['transaction_id', 'amount', 'currency', 'status']
@@ -82,14 +86,30 @@ class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData,
             if status not in ('webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'):
                 status = 'webhook_recieved'
                 
-            return {
+            webhook_data: CoinSubWebhookData = {
                 'transaction_id': subscription['transaction_id'],
                 'amount': float(subscription.get('amount', 0.0)),
                 'currency': subscription.get('currency', 'USD'),
                 'status': cast(Literal['webhook_recieved', 'sent_to_websocket', 'sent_to_processor', 'paid'], status),
                 'user_id': subscription.get('user_id', ''),
-                'subscription_id': subscription.get('subscription_id', '')
+                'subscription_id': subscription.get('subscription_id', ''),
+                'product_id': subscription.get('product_id', ''),
+                'payment_method': payment.get('method', ''),
+                'metadata': subscription.get('metadata', {})
             }
+            
+            # Verify subscription if product_id is available
+            if webhook_data.get('product_id') and webhook_data.get('user_id'):
+                try:
+                    self._verifier.verify_subscription(
+                        webhook_data['user_id'],
+                        webhook_data['product_id']
+                    )
+                except Exception as e:
+                    print(f"Warning: Subscription verification failed: {str(e)}")
+                    
+            return webhook_data
+            
         except (ValueError, KeyError) as e:
             raise CoinSubWebhookError(f"Error parsing event data: {str(e)}")
 
@@ -120,6 +140,12 @@ class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData,
             return 'webhook_recieved'
         elif event_type == 'subscription_expired':
             return 'sent_to_processor'
+        elif event_type == 'payment_received':
+            return 'paid'
+        elif event_type == 'payment_pending':
+            return 'sent_to_websocket'
+        elif event_type == 'payment_failed':
+            return 'webhook_recieved'
         else:
             return 'webhook_recieved'
 
@@ -136,6 +162,16 @@ class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData,
         str
             The item name
         """
+        # Try to get product name from cache
+        if event_data.get('product_id'):
+            try:
+                products = self._verifier.get_products()
+                for product in products.get('data', []):
+                    if product['id'] == event_data['product_id']:
+                        return product['name']
+            except Exception:
+                pass
+        
         return event_data.get('subscription_id', '')
 
     def _get_one_time_payment_data(self, event_data: CoinSubWebhookData) -> OneTimePaymentData[ITEM_CATEGORY]:
@@ -158,7 +194,8 @@ class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData,
             item_name=self._item_name_provider(event_data),
             time_bought=datetime.now().isoformat(),
             status=event_data['status'],
-            quantity=1
+            quantity=1,
+            metadata=event_data.get('metadata', {})
         )
 
     def _get_subscription_payment_data(self, event_data: CoinSubWebhookData) -> SubscriptionPaymentData[ITEM_CATEGORY]:
@@ -174,11 +211,23 @@ class CoinSubWebhook(Generic[ITEM_CATEGORY], AbstractWebhook[CoinSubWebhookData,
         SubscriptionPaymentData
             The subscription payment data
         """
+        # Try to get additional customer data
+        customer_data = {}
+        if event_data.get('user_id'):
+            try:
+                customer_data = self._verifier.get_customer_data(event_data['user_id'])
+            except Exception:
+                pass
+        
         return SubscriptionPaymentData(
             user_id=event_data['user_id'],
             item_category=cast(ITEM_CATEGORY, ItemType.SUBSCRIPTION),
             purchase_id=event_data['transaction_id'],
             item_name=self._item_name_provider(event_data),
             time_bought=datetime.now().isoformat(),
-            status=event_data['status']
+            status=event_data['status'],
+            metadata={
+                **event_data.get('metadata', {}),
+                'customer_data': customer_data
+            }
         ) 

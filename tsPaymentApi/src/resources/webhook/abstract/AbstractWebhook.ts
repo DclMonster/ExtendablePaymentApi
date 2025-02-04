@@ -9,7 +9,7 @@ import { Services } from '../../../services/Services';
 import { getServices } from '../../../services';
 
 export abstract class AbstractWebhook<PROVIDER_DATA, ITEM_CATEGORY extends string> {
-    protected readonly router: Router;
+    protected readonly _router: Router;
     private readonly verifier: SignatureVerifier;
     private readonly providerType: PaymentProvider;
     private readonly forwarder: Forwarder | null;
@@ -20,14 +20,18 @@ export abstract class AbstractWebhook<PROVIDER_DATA, ITEM_CATEGORY extends strin
         verifier: SignatureVerifier,
         forwarder: Forwarder | null = null
     ) {
-        this.router = Router();
+        this._router = Router();
         this.verifier = verifier;
         this.providerType = providerType;
         this.forwarder = forwarder;
         this.services = getServices();
 
         // Set up POST route
-        this.router.post('/', this.post.bind(this));
+        this._router.post('/', this.post.bind(this));
+    }
+
+    public get router(): Router {
+        return this._router;
     }
 
     private async post(req: Request, res: Response): Promise<Response> {
